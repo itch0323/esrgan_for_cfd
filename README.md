@@ -1,7 +1,7 @@
 # super resolution
 pytorchを使用して2次元キャビティ流れの数値計算から得たデータの超解像を実行できます。
 
-このリポジトリではESRGAN<sup>1)をサポートしています。
+このリポジトリではESRGAN<sup>1)</sup>をサポートしています。
 
 実行環境と使用方法は下記の通りです。
 
@@ -20,7 +20,7 @@ pytorchを使用して2次元キャビティ流れの数値計算から得たデ
 ## 使用方法(usage)
 1. リポジトリをクローンします。
 ```
-git clone https://github.com/itch0323/super_resolution.git
+git clone https://github.com/itch0323/esrgan_for_cfd.git
 cd super_resolution
 ```
 
@@ -40,7 +40,7 @@ sh setup.sh
 ```
 
 4. Jupyter Notebookにて超解像を実行します。
-- SRGAN
+- ESRGAN
 ```
 jupyter-notebook
 ```
