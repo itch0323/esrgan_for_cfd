@@ -21,7 +21,7 @@ pytorchを使用して2次元キャビティ流れの数値計算から得たデ
 1. リポジトリをクローンします。
 ```
 git clone https://github.com/itch0323/esrgan_for_cfd.git
-cd esrgan_for_cfd.git
+cd esrgan_for_cfd
 ```
 
 <br>
