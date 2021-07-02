@@ -114,7 +114,7 @@ nc = numpy.array(range(100, 1001, 10))/100
 path_name = "esrgan/input/cfd_sim/train/bin_" + str(args.mesh)
 
 try:
-    os.mkdir(path_name)
+    os.makedirs(path_name)
 except FileExistsError:
     pass
 
