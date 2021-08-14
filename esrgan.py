@@ -1,177 +1,126 @@
-"""
-Super-resolution of CelebA using Generative Adversarial Networks.
-The dataset can be downloaded from: https://www.dropbox.com/sh/8oqt9vytwxb3s4r/AADIKlz8PR9zr6Y20qbkunrba/Img/img_align_celeba.zip?dl=0
-(if not available there see if options are listed at http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html)
-Instrustion on running the script:
-1. Download the dataset from the provided link
-2. Save the folder 'img_align_celeba' to '../../data/'
-4. Run the sript using command 'python3 esrgan.py'
-"""
-
-import argparse
 import os
+import os.path as osp
 import numpy as np
+import torch
+import random
 from torch.utils.data import DataLoader
-from torch.autograd import Variable
-
 from models import *
 from datasets import *
-import torch
+class Opts():
+    def __init__(self):
+        self.n_epoch = 1
+        self.residual_blocks = 23
+        self.lr = 0.0002
+        self.b1 = 0.9
+        self.b2 = 0.999
+        self.batch_size = 8
+        self.n_cpu = 8
+        self.warmup_batches = 5
+        self.lambda_adv = 5e-3
+        self.lambda_pixel = 1e-2
+        self.pretrained = False
+        self.dataset_name = 'cat'
+        self.sample_interval = 100
+        self.checkpoint_interval = 1000
+        self.hr_height = 128
+        self.hr_width = 128
+        self.hr_shape = (128, 128)
+        self.channels = 3
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-os.makedirs("images/training", exist_ok=True)
-os.makedirs("saved_models", exist_ok=True)
+    def to_dict(self):
+        parameters = {
+            'n_epoch': self.n_epoch,
+            'hr_height': self.hr_height,
+            'residual_blocks': self.residual_blocks,
+            'lr': self.lr,
+            'b1': self.b1,
+            'b2': self.b2,
+            'batch_size': self.batch_size,
+            'n_cpu': self.n_cpu,
+            'warmup_batches': self.warmup_batches,
+            'lambda_adv': self.lambda_adv,
+            'lambda_pixel': self.lambda_pixel,
+            'pretrained': self.pretrained,
+            'dataset_name': self.dataset_name,
+            'sample_interval': self.sample_interval,
+            'checkpoint_interval': self.checkpoint_interval,
+            'hr_height': self.hr_height,
+            'hr_width': self.hr_width,
+            'hr_shape': self.hr_shape,
+            'channels': self.channels,
+            'device': str(self.device),
+        }
+        return parameters
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
-parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
-parser.add_argument("--dataset_name", type=str, default="train/", help="name of the dataset")
-parser.add_argument("--batch_size", type=int, default=6, help="size of the batches")
-parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
-parser.add_argument("--b1", type=float, default=0.9, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--decay_epoch", type=int, default=100, help="epoch from which to start lr decay")
-parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
-parser.add_argument("--hr_height", type=int, default=256, help="high res. image height")
-parser.add_argument("--hr_width", type=int, default=256, help="high res. image width")
-parser.add_argument("--channels", type=int, default=3, help="number of image channels")
-parser.add_argument("--sample_interval", type=int, default=100, help="interval between saving image samples")
-parser.add_argument("--checkpoint_interval", type=int, default=5000, help="batch interval between model checkpoints")
-parser.add_argument("--residual_blocks", type=int, default=23, help="number of residual blocks in the generator")
-parser.add_argument("--warmup_batches", type=int, default=500, help="number of batches with pixel-wise loss only")
-parser.add_argument("--lambda_adv", type=float, default=5e-3, help="adversarial loss weight")
-parser.add_argument("--lambda_pixel", type=float, default=1e-2, help="pixel-wise loss weight")
-opt = parser.parse_args()
-print(opt)
+def main():
+    opt = Opts()
+    print(opt.to_dict())
+    hr_shape = (opt.hr_height, opt.hr_height)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ROOT = 'esrgan/' #ルートディレクトリ content/esrgan/
+    output_dir = osp.join(ROOT, 'output') # Colab内に保存 content/esrgan/output
+    input_dir = osp.join(ROOT, 'input') # 入力となるデータセットを保存するディレクトリ content/esrgan/input
+    image_dir = osp.join(input_dir, 'images') # 画像を保存するディレクトリ content/esrgan/input/images
+    annotations_dir = osp.join(input_dir, 'annotations') # アノテーションデータを保存するディレクトリ content/esrgan/input/annotations
+    list_path = osp.join(annotations_dir, 'list.txt') # アノテーションのリストファイルのパス content/esrgan/input/annotations/list.txt
+    dataset_dir = osp.join(input_dir, 'cfd_sim') # データセットのディレクトリ content/esrgan/input/cat_face
+    train_dir = osp.join(dataset_dir, 'train') # データセットの学習データを保存するディレクトリ content/esrgan/input/cat_face/train
+    test_dir = osp.join(dataset_dir, 'test') # データセットのテストデータを保存するディレクトリ content/esrgan/input/cat_face/test
+    demo_dir = osp.join(dataset_dir, 'demo') # デモ用のデータを保存するディレクトリ content/esrgan/input/cat_face/demo
+    image_train_save_dir = osp.join(output_dir, 'image', 'train')
+    image_test_save_dir = osp.join(output_dir, 'image', 'test')
+    weight_save_dir = osp.join(output_dir, 'weight')
+    param_save_path = osp.join(output_dir, 'param.json')
+    log_dir = './logs'
 
-hr_shape = (opt.hr_height, opt.hr_width)
+    save_dirs = [input_dir, log_dir, image_train_save_dir, image_test_save_dir, weight_save_dir]
+    for save_dir in save_dirs:
+        print(save_dir)
+        os.makedirs(save_dir, exist_ok=True)
 
-# Initialize generator and discriminator
-generator = GeneratorRRDB(opt.channels, filters=64, num_res_blocks=opt.residual_blocks).to(device)
-discriminator = Discriminator(input_shape=(opt.channels, *hr_shape)).to(device)
-feature_extractor = FeatureExtractor().to(device)
+    train_data_dir = osp.join(dataset_dir, 'train') #訓練データのディレクトリ content/esrgan/input/cat_face/train
+    test_data_dir = osp.join(dataset_dir, 'test') #検証データのディレクトリ content/esrgan/input/cat_face/test
+    demo_data_dir = osp.join(dataset_dir, 'demo') #テストデータのディレクトリ content/esrgan/input/cat_face/demo
+    seed = 19930124
 
-# Set feature extractor to inference mode
-feature_extractor.eval()
+    random.seed(seed)  
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
-# Losses
-criterion_GAN = torch.nn.BCEWithLogitsLoss().to(device)
-criterion_content = torch.nn.L1Loss().to(device)
-criterion_pixel = torch.nn.L1Loss().to(device)
+    dataset_name = 'cat_face'
 
-if opt.epoch != 0:
-    # Load pretrained models
-    generator.load_state_dict(torch.load("saved_models/generator_%d.pth" % opt.epoch))
-    discriminator.load_state_dict(torch.load("saved_models/discriminator_%d.pth" % opt.epoch))
+    train_dataloader = DataLoader(
+        ImageDataset(train_data_dir, hr_shape=hr_shape),
+        batch_size=opt.batch_size,
+        shuffle=True,
+        num_workers=opt.n_cpu,
+    )
 
-# Optimizers
-optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    test_dataloader = DataLoader(
+        TestImageDataset(test_data_dir),
+        batch_size=1,
+        shuffle=False,
+        num_workers=opt.n_cpu,
+    )
 
-Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
+    # ESRGANを呼び出す
+    esrgan = ESRGAN(opt)
 
-dataloader = DataLoader(
-    ImageDataset("esrgan/input/cfd_sim/%s" % opt.dataset_name, hr_shape=hr_shape),
-    batch_size=opt.batch_size,
-    shuffle=True,
-    num_workers=opt.n_cpu,
-)
+    for epoch in range(1, opt.n_epoch + 1):
+        for batch_num, imgs in enumerate(train_dataloader):
+            batches_done = (epoch - 1) * len(train_dataloader) + batch_num
+            # 事前学習
+            if batches_done <= opt.warmup_batches:
+                esrgan.pre_train(imgs, batches_done, batch_num, epoch)
+            # 本学習
+            else:
+                esrgan.train(imgs, batches_done, batch_num, epoch)
 
-# ----------
-#  Training
-# ----------
-
-for epoch in range(opt.epoch, opt.n_epochs):
-    for i, imgs in enumerate(dataloader):
-
-        batches_done = epoch * len(dataloader) + i
-
-        # Configure model input
-        imgs_lr = Variable(imgs["lr"].type(Tensor))
-        imgs_hr = Variable(imgs["hr"].type(Tensor))
-
-        # Adversarial ground truths
-        valid = Variable(Tensor(np.ones((imgs_lr.size(0), *discriminator.output_shape))), requires_grad=False)
-        fake = Variable(Tensor(np.zeros((imgs_lr.size(0), *discriminator.output_shape))), requires_grad=False)
-
-        # ------------------
-        #  Train Generators
-        # ------------------
-
-        optimizer_G.zero_grad()
-
-        # Generate a high resolution image from low resolution input
-        gen_hr = generator(imgs_lr)
-
-        # Measure pixel-wise loss against ground truth
-        loss_pixel = criterion_pixel(gen_hr, imgs_hr)
-
-        if batches_done < opt.warmup_batches:
-            # Warm-up (pixel-wise loss only)
-            loss_pixel.backward()
-            optimizer_G.step()
-            print(
-                "[Epoch %d/%d] [Batch %d/%d] [G pixel: %f]"
-                % (epoch, opt.n_epochs, i, len(dataloader), loss_pixel.item())
-            )
-            continue
-
-        # Extract validity predictions from discriminator
-        pred_real = discriminator(imgs_hr).detach()
-        pred_fake = discriminator(gen_hr)
-
-        # Adversarial loss (relativistic average GAN)
-        loss_GAN = criterion_GAN(pred_fake - pred_real.mean(0, keepdim=True), valid)
-
-        # Content loss
-        gen_features = feature_extractor(gen_hr)
-        real_features = feature_extractor(imgs_hr).detach()
-        loss_content = criterion_content(gen_features, real_features)
-
-        # Total generator loss
-        loss_G = loss_content + opt.lambda_adv * loss_GAN + opt.lambda_pixel * loss_pixel
-
-        loss_G.backward()
-        optimizer_G.step()
-
-        # ---------------------
-        #  Train Discriminator
-        # ---------------------
-
-        optimizer_D.zero_grad()
-
-        pred_real = discriminator(imgs_hr)
-        pred_fake = discriminator(gen_hr.detach())
-
-        # Adversarial loss for real and fake images (relativistic average GAN)
-        loss_real = criterion_GAN(pred_real - pred_fake.mean(0, keepdim=True), valid)
-        loss_fake = criterion_GAN(pred_fake - pred_real.mean(0, keepdim=True), fake)
-
-        # Total loss
-        loss_D = (loss_real + loss_fake) / 2
-
-        loss_D.backward()
-        optimizer_D.step()
-
-        # --------------
-        #  Log Progress
-        # --------------
-
-        print(
-            "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, content: %f, adv: %f, pixel: %f]"
-            % (
-                epoch,
-                opt.n_epochs,
-                i,
-                len(dataloader),
-                loss_D.item(),
-                loss_G.item(),
-                loss_content.item(),
-                loss_GAN.item(),
-                loss_pixel.item(),
-            )
-        )
-
-        torch.save(generator.state_dict(), "saved_models/generator_%d.pth" % epoch)
-        torch.save(discriminator.state_dict(), "saved_models/discriminator_%d.pth" %epoch)
+            # 学習した重みの保存
+            if batches_done % opt.checkpoint_interval == 0:
+                esrgan.save_weight(batches_done, weight_save_dir)
+ 
+if __name__ == '__main__':
+    main()
